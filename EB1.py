@@ -4,7 +4,6 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import random
-import io
 
 st.set_page_config(
     page_title="K-Means Clustering - Elbow Method",
@@ -12,8 +11,8 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-st.title("🔍 K-Means Clustering dengan Metode Elbow")
-st.markdown("Optimalkan jumlah kluster menggunakan Metode Elbow.")
+st.title("🔍 K-Means Clustering dengan Metode Elbow Precision")
+st.markdown("Optimalkan jumlah kluster menggunakan Metode Elbow yang diprecise dari sudut siku.")
 
 with st.sidebar:
     st.header("Pengaturan Data")
@@ -25,12 +24,14 @@ with st.sidebar:
     if uploaded_file is None:
         n = st.number_input("Jumlah data", min_value=1, value=5, step=1)
         dim = st.number_input("Jumlah dimensi", min_value=1, value=2, step=1)
-    max_k = st.number_input("Max jumlah kluster", min_value=2, value=10 if 'n' not in locals() else min(10, n), step=1)
-    
-    threshold = st.sidebar.slider("Ambang batas penurunan SSE (%)", min_value=0.0, max_value=1.0, value=0.2, step=0.05)
+    max_k = st.number_input(
+        "Max jumlah kluster", min_value=2,
+        value=10 if 'n' not in locals() else min(10, n), step=1
+    )
     st.markdown("---")
     st.markdown("**Tips:** Upload file CSV/XLSX dengan setiap kolom sebagai dimensi, atau masukkan manual di area utama.")
 
+# Load or input data
 if uploaded_file is not None:
     try:
         if uploaded_file.name.lower().endswith('.csv'):
@@ -40,7 +41,6 @@ if uploaded_file is not None:
     except Exception as e:
         st.error(f"Gagal membaca file: {e}")
         st.stop()
-    # Derive n and dim from file
     n, dim = data_df.shape
     st.subheader("📂 Data dari File")
     st.dataframe(data_df, use_container_width=True)
@@ -55,71 +55,84 @@ else:
         key="data_editor"
     )
 
+# Convert to numpy
 try:
     data_np = data_df.to_numpy(dtype=float)
 except Exception:
     st.error("Data tidak valid: pastikan semua nilai numerik dan tidak ada cell kosong.")
     st.stop()
 
-def compute_kmeans(data_np, k, max_iter=100):
-    n_samples, _ = data_np.shape
-    indices = random.sample(range(n_samples), k)
-    centroids = data_np[indices].copy()
-    labels = np.zeros(n_samples, dtype=int)
+# K-means implementation
 
+def compute_kmeans(data, k, max_iter=100):
+    n_samples = data.shape[0]
+    # Init centroids randomly
+    indices = random.sample(range(n_samples), k)
+    centroids = data[indices].copy()
+    labels = np.zeros(n_samples, dtype=int)
     for _ in range(max_iter):
-        new_labels = np.array([np.argmin([np.linalg.norm(x - c) for c in centroids]) for x in data_np])
-        if np.all(new_labels == labels):
+        new_labels = np.array([np.argmin([np.linalg.norm(x - c) for c in centroids]) for x in data])
+        if np.array_equal(new_labels, labels):
             break
         labels = new_labels
         for i in range(k):
-            pts = data_np[labels == i]
+            pts = data[labels == i]
             if pts.size:
                 centroids[i] = pts.mean(axis=0)
-
-    sse = sum(np.linalg.norm(data_np[i] - centroids[labels[i]])**2 for i in range(len(data_np)))
+    # Compute SSE
+    sse = sum(np.linalg.norm(data[i] - centroids[labels[i]])**2 for i in range(len(data)))
     return labels, centroids, sse
 
-sse_list, all_labels, all_centroids = [], [], []
+# Compute SSE list
+sse_list = []
+all_labels = []
+all_centroids = []
 for k in range(1, max_k + 1):
     labels, centroids, sse = compute_kmeans(data_np.copy(), k)
     sse_list.append(sse)
     all_labels.append(labels)
     all_centroids.append(centroids)
 
-def elbow_method(ssecluster):
-    x1, y1 = 0, ssecluster[0]
-    x2, y2 = len(ssecluster)-1, ssecluster[-1]
-    max_dist, opt_k = 0, 1
-    for i in range(1, len(ssecluster)-1):
-        x0, y0 = i, ssecluster[i]
-        dist = abs((y2-y1)*x0 - (x2-x1)*y0 + x2*y1 - y2*x1) / np.hypot(y2-y1, x2-x1)
-        if dist > max_dist:
-            max_dist, opt_k = dist, i+1
-    if opt_k > 2 and (ssecluster[opt_k-2] - ssecluster[opt_k-1]) / ssecluster[opt_k-2] < threshold:
-        opt_k -= 1
-    return opt_k
+# Precision Elbow: compute tan(psi)
+tanpsi = [0]
+n = len(sse_list)
+for k in range(1, n-1):
+    prev = sse_list[k] - sse_list[k-1]
+    next_ = sse_list[k+1] - sse_list[k]
+    if next_ <= prev:
+        tanpsi.append(0)
+    else:
+        num = -sse_list[k+1] + 2*sse_list[k] - sse_list[k-1]
+        den = 1 + prev * next_
+        tanpsi.append(num / den)
+# Boundary
+if n > 1:
+    tanpsi.append(0)
 
-opt_k = elbow_method(sse_list)
+# Optimal k: smallest tanpsi (most negative)
+opt_k = int(np.argmin(tanpsi) + 1)
 
+# Display results
 st.markdown("---")
 col1, col2 = st.columns([3, 5])
 with col1:
-    st.subheader("📈 Grafik SSE vs Kluster")
-    fig = go.Figure(
-        layout=go.Layout(
-            template="plotly_white", title=dict(text="SSE vs Jumlah Kluster", x=0.5),
-            xaxis=dict(title="Jumlah Kluster (K)", tickmode="linear", dtick=1, showgrid=False),
-            yaxis=dict(title="SSE", showgrid=True, gridcolor="lightgrey"),
-            margin=dict(l=40, r=20, t=50, b=40)
-        )
+    st.subheader("📈 Grafik SSE dan tan(ψ) vs Kluster")
+    fig = go.Figure(layout=go.Layout(
+        template="plotly_white",
+        title=dict(text="SSE dan tan(ψ) vs Jumlah Kluster", x=0.5),
+        xaxis=dict(title="Jumlah Kluster (K)", tickmode="linear", dtick=1, showgrid=False),
+        yaxis=dict(title="SSE", showgrid=True, gridcolor="lightgrey")
+    ))
+    fig.add_trace(go.Scatter(x=list(range(1, max_k+1)), y=sse_list, mode='lines+markers', marker=dict(size=8), line=dict(width=2), name='SSE'))
+    fig.add_trace(go.Scatter(x=list(range(1, max_k+1)), y=tanpsi, mode='lines+markers', marker_symbol='x', marker=dict(size=8), line=dict(dash='dash'), name='tan(ψ)', yaxis='y2'))
+    # Add secondary y-axis
+    fig.update_layout(
+        yaxis2=dict(title='tan(ψ)', overlaying='y', side='right')
     )
-    fig.add_trace(go.Scatter(x=list(range(1, max_k+1)), y=sse_list, mode='lines+markers', marker=dict(size=8), line=dict(width=2)))
-    fig.update_layout(legend=dict(orientation="h", y=1.02, x=1))
     st.plotly_chart(fig, use_container_width=True)
-    st.success(f"🔎 Kluster optimal: {opt_k}")
+    st.success(f"🔎 Kluster optimal (precision): {opt_k}")
 with col2:
-    st.subheader("📊 Hasil Clusterisasi Data")
+    st.subheader("📊 Hasil Klasterisasi")
     for i in range(opt_k):
         pts = data_np[all_labels[opt_k-1] == i]
         count = pts.shape[0]
@@ -129,6 +142,7 @@ with col2:
                 st.dataframe(df_cluster, use_container_width=True)
             else:
                 st.write("Tidak ada data pada kluster ini.")
+
 # Footer
 st.markdown("---")
 st.markdown("© 2025 - Clustering KMeans | Alfin")
