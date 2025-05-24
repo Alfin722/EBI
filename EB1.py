@@ -116,12 +116,9 @@ n = len(sse_list)
 for k in range(1, n-1):
     prev = sse_list[k] - sse_list[k-1]
     next_ = sse_list[k+1] - sse_list[k]
-    if next_ <= prev:
-        tanpsi.append(0)
-    else:
-        num = -sse_list[k+1] + 2*sse_list[k] - sse_list[k-1]
-        den = 1 + prev * next_
-        tanpsi.append(num / den)
+    num = -sse_list[k+1] + 2*sse_list[k] - sse_list[k-1]
+    den = 1 + prev * next_
+    tanpsi.append(num / den)
 # Boundary
 if n > 1:
     tanpsi.append(0)
