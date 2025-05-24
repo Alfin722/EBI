@@ -62,11 +62,29 @@ except Exception:
     st.error("Data tidak valid: pastikan semua nilai numerik dan tidak ada cell kosong.")
     st.stop()
 
-# K-means implementation
+# ===== Preprocessing: Standardize and Winsorize outliers =====
+# 1. Transformasi ke normal standar (Z-score)
+means = data_np.mean(axis=0)
+stds = data_np.std(axis=0)
+data_scaled = (data_np - means) / stds
 
+# 2. Cari outliers dengan IQR dan 3. Ganti dengan bounds (Winsorizing)
+for j in range(data_scaled.shape[1]):
+    col = data_scaled[:, j]
+    q1 = np.percentile(col, 25)
+    q3 = np.percentile(col, 75)
+    iqr = q3 - q1
+    lower = q1 - 1.5 * iqr
+    upper = q3 + 1.5 * iqr
+    # Clip outliers to bounds
+    data_scaled[:, j] = np.clip(col, lower, upper)
+
+# Gunakan data_scaled sebagai input k-means
+data_processed = data_scaled.copy()
+
+# K-means implementation
 def compute_kmeans(data, k, max_iter=100):
     n_samples = data.shape[0]
-    # Init centroids randomly
     indices = random.sample(range(n_samples), k)
     centroids = data[indices].copy()
     labels = np.zeros(n_samples, dtype=int)
@@ -79,7 +97,6 @@ def compute_kmeans(data, k, max_iter=100):
             pts = data[labels == i]
             if pts.size:
                 centroids[i] = pts.mean(axis=0)
-    # Compute SSE
     sse = sum(np.linalg.norm(data[i] - centroids[labels[i]])**2 for i in range(len(data)))
     return labels, centroids, sse
 
@@ -88,7 +105,7 @@ sse_list = []
 all_labels = []
 all_centroids = []
 for k in range(1, max_k + 1):
-    labels, centroids, sse = compute_kmeans(data_np.copy(), k)
+    labels, centroids, sse = compute_kmeans(data_processed.copy(), k)
     sse_list.append(sse)
     all_labels.append(labels)
     all_centroids.append(centroids)
@@ -125,7 +142,6 @@ with col1:
     ))
     fig.add_trace(go.Scatter(x=list(range(1, max_k+1)), y=sse_list, mode='lines+markers', marker=dict(size=8), line=dict(width=2), name='SSE'))
     fig.add_trace(go.Scatter(x=list(range(1, max_k+1)), y=tanpsi, mode='lines+markers', marker_symbol='x', marker=dict(size=8), line=dict(dash='dash'), name='tan(ψ)', yaxis='y2'))
-    # Add secondary y-axis
     fig.update_layout(
         yaxis2=dict(title='tan(ψ)', overlaying='y', side='right')
     )
@@ -134,7 +150,7 @@ with col1:
 with col2:
     st.subheader("📊 Hasil Klasterisasi")
     for i in range(opt_k):
-        pts = data_np[all_labels[opt_k-1] == i]
+        pts = data_processed[all_labels[opt_k-1] == i]
         count = pts.shape[0]
         with st.expander(f"Cluster {i+1} ({count} data points)"):
             if count:
@@ -143,6 +159,5 @@ with col2:
             else:
                 st.write("Tidak ada data pada kluster ini.")
 
-# Footer
 st.markdown("---")
 st.markdown("© 2025 - Clustering KMeans | Alfin")
